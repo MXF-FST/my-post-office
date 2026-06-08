@@ -13,8 +13,89 @@
         @keyframes breatheFade { 0% { opacity: 0; } 100% { opacity: 1; } }
         .text-button { color: #FFFFFF; background: none; border: none; font-size: 16px; line-height: 1.8; cursor: pointer; margin: 1rem 0; padding: 8px 0; font-family: inherit; transition: opacity 0.2s; display: inline-block; }
         .text-button:active { opacity: 0.7; }
-        #heartbeatCanvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 20; display: none; }
-        .heartbeat-active #heartbeatCanvas { display: block; }
+        
+        /* 美化通话界面样式 */
+        .call-ui {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 15;
+            background: rgba(0,0,0,0.85);
+            backdrop-filter: blur(20px);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            padding: 60px 20px 80px;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.4s ease;
+        }
+        .call-ui.active {
+            opacity: 1;
+            visibility: visible;
+        }
+        .call-status {
+            font-size: 14px;
+            letter-spacing: 2px;
+            color: rgba(255,255,255,0.7);
+            margin-top: 20px;
+        }
+        .call-avatar {
+            width: 120px;
+            height: 120px;
+            background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.2), rgba(255,255,255,0.05));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 40px 0;
+            border: 1px solid rgba(255,255,255,0.2);
+            box-shadow: 0 0 40px rgba(0,0,0,0.5);
+        }
+        .call-avatar::after {
+            content: "📞";
+            font-size: 48px;
+            opacity: 0.8;
+        }
+        .call-timer {
+            font-size: 28px;
+            font-weight: 300;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 2px;
+            background: rgba(0,0,0,0.4);
+            padding: 8px 24px;
+            border-radius: 40px;
+            backdrop-filter: blur(4px);
+            margin-bottom: 30px;
+        }
+        .call-decor-hangup {
+            font-size: 12px;
+            color: rgba(255,100,100,0.6);
+            background: rgba(0,0,0,0.3);
+            padding: 8px 20px;
+            border-radius: 30px;
+            width: auto;
+            display: inline-block;
+            pointer-events: none;  /* 纯装饰，不可点击 */
+        }
+        /* 心跳光晕覆盖在美化层之上 */
+        #heartbeatCanvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 25;
+            display: none;
+        }
+        .heartbeat-active #heartbeatCanvas {
+            display: block;
+        }
+        /* 其他页面样式保持不变 */
         .camera-layer { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 30; transform: scaleX(-1); display: none; }
         .camera-layer.active { display: block; }
         .camera-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 31; pointer-events: none; }
@@ -23,17 +104,26 @@
         .hold-to-exit { position: absolute; bottom: 0; left: 0; width: 100%; height: 80px; z-index: 33; pointer-events: auto; }
         .payment-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 200; display: flex; align-items: center; justify-content: center; flex-direction: column; }
         .payment-box { background: #111; padding: 30px; border-radius: 12px; width: 80%; text-align: center; }
-        .hidden { display: none !important; }
         .card-preview { background: #1a1a1a; padding: 20px; margin: 20px; border-radius: 16px; }
         textarea { width: 90%; background: #222; color: white; border: 1px solid #444; padding: 12px; font-size: 16px; margin: 15px 0; font-family: monospace; }
-        .flex-col { display: flex; flex-direction: column; gap: 12px; align-items: center; }
         .loading-toast { position: fixed; bottom: 30px; left: 20%; width: 60%; background: rgba(255,255,255,0.2); color: white; padding: 8px; border-radius: 20px; font-size: 14px; text-align: center; z-index: 300; }
     </style>
 </head>
 <body>
+    <!-- 微信引导页 -->
     <div id="wechatGuide" class="page"><div style="max-width:280px;"><div class="text-line">这是一次需要</div><div class="text-line">全屏、安静、不被打扰的通话</div><div class="text-line" style="margin-top:24px;">微信太吵了</div><div class="text-line" style="margin-top:24px;">请点击右上角</div><div class="text-line">选择「在浏览器中打开」</div><div class="text-line">我们在那里等你</div></div></div>
+    <!-- 序章 -->
     <div id="prologuePage" class="page"><div id="prologueText"></div><button id="acceptBtn" class="text-button" style="margin-top:48px;">我接受，开始通话</button></div>
+    <!-- 通话中 - 原始空白页（用于控制心跳active） -->
     <div id="callPage" class="page"></div>
+    <!-- 美化通话界面 -->
+    <div id="callUI" class="call-ui">
+        <div class="call-status">通话中 • 边缘心跳与你同步</div>
+        <div class="call-avatar"></div>
+        <div class="call-timer" id="callTimer">00:00</div>
+        <div class="call-decor-hangup">· 仅作装饰 ·</div>
+    </div>
+    <!-- 摄像头及其他 -->
     <video id="cameraVideo" class="camera-layer" autoplay playsinline muted></video>
     <div class="camera-overlay" id="cameraOverlay"><div class="escape-text">按住屏幕，回到黑暗</div><div class="hold-to-exit" id="holdToExit"></div></div>
     <div id="epiloguePage" class="page"><div id="epilogueText"></div></div>
@@ -56,11 +146,17 @@
             let isExiting = false;
             let callAudio = null;
             let isPrologueFinished = false;
-            let jumpExecuted = false;      // 防止多次跳转
-            let progressInterval = null;    // 进度检测定时器
+            let jumpExecuted = false;
+            let progressInterval = null;
+            let callStartTime = 0;
+            let timerInterval = null;
+            
+            // 美化UI元素
+            const callUIDiv = document.getElementById('callUI');
+            const callTimerSpan = document.getElementById('callTimer');
             
             function hardExitAndClear() { if(isExiting) return; isExiting=true; stopAllMedia(); releaseWakeLock(); clearAllLocalData(); document.body.innerHTML=''; window.location.replace('about:blank'); }
-            function clearAllLocalData() { if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); if(callAudio) { callAudio.pause(); callAudio = null; } if(animationFrameId) cancelAnimationFrame(animationFrameId); if(timerAutoNext) clearTimeout(timerAutoNext); if(progressInterval) clearInterval(progressInterval); localStorage.clear(); sessionStorage.clear(); try{ window.location.hash=''; }catch(e){} }
+            function clearAllLocalData() { if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); if(callAudio) { callAudio.pause(); callAudio = null; } if(animationFrameId) cancelAnimationFrame(animationFrameId); if(timerAutoNext) clearTimeout(timerAutoNext); if(progressInterval) clearInterval(progressInterval); if(timerInterval) clearInterval(timerInterval); localStorage.clear(); sessionStorage.clear(); try{ window.location.hash=''; }catch(e){} }
             function stopAllMedia() { if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); if(videoElement && videoElement.srcObject) { videoElement.srcObject.getTracks().forEach(t=>t.stop()); videoElement.srcObject=null; } if(callAudio) { callAudio.pause(); callAudio = null; } }
             async function requestWakeLock() { try { if('wakeLock' in navigator) wakeLockSentinel = await navigator.wakeLock.request('screen'); } catch(e){} }
             function releaseWakeLock() { if(wakeLockSentinel) wakeLockSentinel.release(); }
@@ -110,6 +206,19 @@
                 requestAnimationFrame(()=>setTimeout(drawHeartBeat, 50));
             }
             
+            // 启动通话计时器
+            function startCallTimer() {
+                callStartTime = Date.now();
+                if (timerInterval) clearInterval(timerInterval);
+                timerInterval = setInterval(() => {
+                    if (currentPage !== 'call') return;
+                    const elapsed = Math.floor((Date.now() - callStartTime) / 1000);
+                    const mins = Math.floor(elapsed / 60);
+                    const secs = elapsed % 60;
+                    callTimerSpan.innerText = `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
+                }, 1000);
+            }
+            
             async function playCallAudio() {
                 if (callAudio) {
                     callAudio.pause();
@@ -124,32 +233,30 @@
                     if (jumpExecuted) return;
                     jumpExecuted = true;
                     if (progressInterval) clearInterval(progressInterval);
+                    if (timerInterval) clearInterval(timerInterval);
                     if (currentPage === 'call') {
                         console.log('跳转到镜中之我');
                         goToMirrorPage();
                     }
                 };
                 
-                // 1. ended 事件
                 callAudio.addEventListener('ended', safeJump);
-                // 2. 错误事件
                 callAudio.addEventListener('error', (e) => {
                     console.error('音频错误', e);
                     safeJump();
                 });
                 
-                // 3. 暴力检测：每 200ms 检查播放进度
+                // 进度检测
                 progressInterval = setInterval(() => {
                     if (!callAudio || callAudio.ended) return;
                     const duration = callAudio.duration;
                     const current = callAudio.currentTime;
                     if (duration && !isNaN(duration) && current >= duration - 0.1) {
-                        console.log('进度检测触发跳转', current, duration);
                         safeJump();
                     }
                 }, 200);
                 
-                // 4. 后备定时器（以防万一）
+                // 后备定时器
                 let fallbackTimer = setTimeout(() => {
                     console.log('后备定时器触发');
                     safeJump();
@@ -164,6 +271,7 @@
                 
                 try {
                     await callAudio.play();
+                    startCallTimer(); // 开始计时
                 } catch (err) {
                     console.error('自动播放失败', err);
                     safeJump();
@@ -175,8 +283,15 @@
                 const target = document.getElementById(pageId);
                 if(target) target.classList.add('active');
                 currentPage = pageId;
-                if(pageId === 'callPage') document.body.classList.add('heartbeat-active');
-                else document.body.classList.remove('heartbeat-active');
+                if(pageId === 'callPage') {
+                    document.body.classList.add('heartbeat-active');
+                    // 显示美化UI
+                    callUIDiv.classList.add('active');
+                } else {
+                    document.body.classList.remove('heartbeat-active');
+                    callUIDiv.classList.remove('active');
+                    if(timerInterval) clearInterval(timerInterval);
+                }
                 if(pageId === 'prologuePage') animatePrologue();
                 if(pageId === 'epiloguePage') animateEpilogue();
                 if(pageId === 'conversionPage') renderConversion();
@@ -238,7 +353,6 @@
             }
             
             async function goToMirrorPage() {
-                // 确保摄像头画面显示
                 if(!videoElement.srcObject && mediaStream) videoElement.srcObject = mediaStream;
                 if(videoElement.srcObject) {
                     try { await videoElement.play(); } catch(e) { console.warn(e); }
