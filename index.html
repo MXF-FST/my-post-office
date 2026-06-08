@@ -46,7 +46,6 @@
             let heartRateBPM = 75;
             let heartRateValid = false;
             let animationFrameId = null;
-            let audioCtxGlobal = null;
             let timerAutoNext = null;
             let heartRateHistory = [];
             let videoElement = document.getElementById('cameraVideo');
@@ -54,10 +53,11 @@
             let ctxHeart = canvasHeart.getContext('2d');
             let greenValues = [];
             let isExiting = false;
+            let callAudio = null;   // 用于存储 audio 元素
             
             function hardExitAndClear() { if(isExiting) return; isExiting=true; stopAllMedia(); releaseWakeLock(); clearAllLocalData(); document.body.innerHTML=''; window.location.replace('about:blank'); }
-            function clearAllLocalData() { if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); if(audioCtxGlobal) audioCtxGlobal.close(); if(animationFrameId) cancelAnimationFrame(animationFrameId); if(timerAutoNext) clearTimeout(timerAutoNext); localStorage.clear(); sessionStorage.clear(); try{ window.location.hash=''; }catch(e){} }
-            function stopAllMedia() { if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); if(videoElement && videoElement.srcObject) { videoElement.srcObject.getTracks().forEach(t=>t.stop()); videoElement.srcObject=null; } if(audioCtxGlobal) audioCtxGlobal.close(); }
+            function clearAllLocalData() { if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); if(callAudio) { callAudio.pause(); callAudio = null; } if(animationFrameId) cancelAnimationFrame(animationFrameId); if(timerAutoNext) clearTimeout(timerAutoNext); localStorage.clear(); sessionStorage.clear(); try{ window.location.hash=''; }catch(e){} }
+            function stopAllMedia() { if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); if(videoElement && videoElement.srcObject) { videoElement.srcObject.getTracks().forEach(t=>t.stop()); videoElement.srcObject=null; } if(callAudio) { callAudio.pause(); callAudio = null; } }
             async function requestWakeLock() { try { if('wakeLock' in navigator) wakeLockSentinel = await navigator.wakeLock.request('screen'); } catch(e){} }
             function releaseWakeLock() { if(wakeLockSentinel) wakeLockSentinel.release(); }
             
@@ -106,24 +106,38 @@
                 requestAnimationFrame(()=>setTimeout(drawHeartBeat, 50));
             }
             
-                      // 使用 <audio> 标签播放，简单稳定
+            // ***** 最终稳定版：使用 <audio> 播放 call.mp3 *****
             async function playCallAudio() {
-                // 创建一个隐藏的 audio 元素
-                const audio = new Audio('call.mp3');
-                audio.loop = false;
-                audio.volume = 0.8;
+                // 如果已经存在，先停止
+                if (callAudio) {
+                    callAudio.pause();
+                    callAudio = null;
+                }
+                callAudio = new Audio('call.mp3');
+                callAudio.loop = false;
+                callAudio.volume = 0.8;
                 
-                // 播放音频
-                try {
-                    await audio.play();
-                    // 监听播放结束事件
-                    audio.addEventListener('ended', () => {
+                // 监听播放结束
+                callAudio.addEventListener('ended', () => {
+                    if (currentPage === 'call') goToMirrorPage();
+                });
+                
+                // 监听播放错误（例如文件不存在）
+                callAudio.addEventListener('error', (e) => {
+                    console.error('音频错误', e);
+                    alert('录音文件加载失败，请检查网络后刷新重试');
+                    // 3秒后仍然跳转
+                    setTimeout(() => {
                         if (currentPage === 'call') goToMirrorPage();
-                    });
+                    }, 3000);
+                });
+                
+                try {
+                    await callAudio.play();
                 } catch (err) {
-                    console.error('音频播放失败', err);
-                    alert('无法播放录音，请检查网络后刷新重试');
-                    // 3秒后仍跳转，避免卡死
+                    console.error('自动播放被阻止', err);
+                    alert('无法自动播放，请点击页面后重试');
+                    // 降级：3秒后跳转
                     setTimeout(() => {
                         if (currentPage === 'call') goToMirrorPage();
                     }, 3000);
