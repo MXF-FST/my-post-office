@@ -27,11 +27,12 @@
         .card-preview { background: #1a1a1a; padding: 20px; margin: 20px; border-radius: 16px; }
         textarea { width: 90%; background: #222; color: white; border: 1px solid #444; padding: 12px; font-size: 16px; margin: 15px 0; font-family: monospace; }
         .flex-col { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+        .loading-toast { position: fixed; bottom: 30px; left: 20%; width: 60%; background: rgba(255,255,255,0.2); color: white; padding: 8px; border-radius: 20px; font-size: 14px; text-align: center; z-index: 300; }
     </style>
 </head>
 <body>
     <div id="wechatGuide" class="page"><div style="max-width:280px;"><div class="text-line">这是一次需要</div><div class="text-line">全屏、安静、不被打扰的通话</div><div class="text-line" style="margin-top:24px;">微信太吵了</div><div class="text-line" style="margin-top:24px;">请点击右上角</div><div class="text-line">选择「在浏览器中打开」</div><div class="text-line">我们在那里等你</div></div></div>
-    <div id="prologuePage" class="page"><div id="prologueText"></div><button id="acceptBtn" class="text-button" style="margin-top:48px; opacity:0;">我接受，开始通话</button></div>
+    <div id="prologuePage" class="page"><div id="prologueText"></div><button id="acceptBtn" class="text-button" style="margin-top:48px;">我接受，开始通话</button></div>
     <div id="callPage" class="page"></div>
     <video id="cameraVideo" class="camera-layer" autoplay playsinline muted></video>
     <div class="camera-overlay" id="cameraOverlay"><div class="escape-text">按住屏幕，回到黑暗</div><div class="hold-to-exit" id="holdToExit"></div></div>
@@ -53,7 +54,8 @@
             let ctxHeart = canvasHeart.getContext('2d');
             let greenValues = [];
             let isExiting = false;
-            let callAudio = null;   // audio元素
+            let callAudio = null;
+            let isPrologueFinished = false;  // 标记序章文字是否播放完毕
             
             function hardExitAndClear() { if(isExiting) return; isExiting=true; stopAllMedia(); releaseWakeLock(); clearAllLocalData(); document.body.innerHTML=''; window.location.replace('about:blank'); }
             function clearAllLocalData() { if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); if(callAudio) { callAudio.pause(); callAudio = null; } if(animationFrameId) cancelAnimationFrame(animationFrameId); if(timerAutoNext) clearTimeout(timerAutoNext); localStorage.clear(); sessionStorage.clear(); try{ window.location.hash=''; }catch(e){} }
@@ -106,14 +108,11 @@
                 requestAnimationFrame(()=>setTimeout(drawHeartBeat, 50));
             }
             
-            // ***** 完全修复版：预加载 + 双重跳转保障 + 防卡顿 *****
             async function playCallAudio() {
-                // 如果已存在，先停止并清理
                 if (callAudio) {
                     callAudio.pause();
                     callAudio = null;
                 }
-                
                 callAudio = new Audio('call.mp3');
                 callAudio.preload = 'auto';
                 callAudio.loop = false;
@@ -124,42 +123,34 @@
                     if (jumpExecuted) return;
                     jumpExecuted = true;
                     if (currentPage === 'call') {
-                        console.log('触发跳转到镜中之我');
+                        console.log('跳转到镜中之我');
                         goToMirrorPage();
                     }
                 };
                 
-                // 1. ended 事件
                 callAudio.addEventListener('ended', safeJump);
-                // 2. 错误事件
                 callAudio.addEventListener('error', (e) => {
                     console.error('音频错误', e);
                     alert('录音加载失败，将自动继续');
                     safeJump();
                 });
                 
-                // 3. 获取音频实际时长，设置智能后备定时器
                 let fallbackTimer = null;
                 const setFallback = (delay) => {
                     if (fallbackTimer) clearTimeout(fallbackTimer);
                     fallbackTimer = setTimeout(() => {
-                        console.log('后备定时器触发，强制跳转');
+                        console.log('后备定时器触发');
                         safeJump();
                     }, delay);
                 };
-                // 初始后备：180秒（3分钟）
                 setFallback(180000);
-                
-                // 当元数据加载完成后，用更精确的时长重置后备定时器
                 callAudio.addEventListener('loadedmetadata', () => {
                     const durationMs = callAudio.duration * 1000;
                     if (durationMs > 0 && durationMs < 600000) {
-                        console.log('音频时长:', durationMs, 'ms');
-                        setFallback(durationMs + 1500); // 音频长度 + 1.5秒
+                        setFallback(durationMs + 1500);
                     }
                 });
                 
-                // 尝试播放
                 try {
                     await callAudio.play();
                 } catch (err) {
@@ -171,7 +162,8 @@
             
             function showPage(pageId) {
                 document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-                document.getElementById(pageId)?.classList.add('active');
+                const target = document.getElementById(pageId);
+                if(target) target.classList.add('active');
                 currentPage = pageId;
                 if(pageId === 'callPage') document.body.classList.add('heartbeat-active');
                 else document.body.classList.remove('heartbeat-active');
@@ -184,15 +176,28 @@
                 const container = document.getElementById('prologueText');
                 const prologueLines = ["接下来的3分钟","是一通电话的录音","","电话那头","是一个决定去死的人","","你无法救她","也无法离开","","你只能听","","如果你愿意","请将手指放在摄像头上","","你的心跳","会成为这段音频的背景音乐","","所有数据留在你的手机里","通话结束后自动销毁",""];
                 container.innerHTML = '';
-                let idx=0;
+                let idx = 0;
                 function showNext() {
-                    if(idx>=prologueLines.length){ document.getElementById('acceptBtn').style.opacity='1'; return; }
-                    if(prologueLines[idx].trim()!==''){ const div=document.createElement('div'); div.className='text-line'; div.innerText=prologueLines[idx]; container.appendChild(div); }
-                    else { const br=document.createElement('div'); br.style.height='1rem'; container.appendChild(br); }
-                    idx++; setTimeout(showNext, idx===prologueLines.length?200:1800);
+                    if(idx >= prologueLines.length) {
+                        isPrologueFinished = true;
+                        return;
+                    }
+                    if(prologueLines[idx].trim() !== '') {
+                        const div = document.createElement('div');
+                        div.className = 'text-line';
+                        div.innerText = prologueLines[idx];
+                        container.appendChild(div);
+                    } else {
+                        const br = document.createElement('div');
+                        br.style.height = '1rem';
+                        container.appendChild(br);
+                    }
+                    idx++;
+                    setTimeout(showNext, idx === prologueLines.length ? 200 : 1800);
                 }
                 showNext();
             }
+            
             function animateEpilogue() {
                 const container = document.getElementById('epilogueText');
                 const epilogueLines = ["她没有说为什么","","但你的心跳","为这3分钟的沉默","打上了独属于你的节拍","","这就是你存在过的证明"];
@@ -215,11 +220,14 @@
                     heartRateValid = true;
                     drawHeartBeat();
                     return true;
-                } catch(e) { heartRateValid = false; return false; }
+                } catch(e) {
+                    console.error('摄像头错误', e);
+                    heartRateValid = false;
+                    return false;
+                }
             }
             
             async function goToMirrorPage() {
-                // 确保摄像头画面显示
                 if(!videoElement.srcObject && mediaStream) videoElement.srcObject = mediaStream;
                 if(videoElement.srcObject) await videoElement.play();
                 videoElement.classList.add('active');
@@ -280,17 +288,60 @@
                 });
             }
             
-            if(/MicroMessenger/i.test(navigator.userAgent)) { document.getElementById('wechatGuide').classList.add('active'); }
-            else {
-                showPage('prologuePage');
-                document.getElementById('acceptBtn').addEventListener('click', async ()=>{
+            // 核心修复：确保按钮可点，并给出视觉反馈
+            async function onAccept() {
+                const btn = document.getElementById('acceptBtn');
+                if (btn.disabled) return;
+                btn.disabled = true;
+                btn.style.opacity = '0.5';
+                // 显示临时提示
+                const toast = document.createElement('div');
+                toast.className = 'loading-toast';
+                toast.innerText = '正在准备，请稍候...';
+                document.body.appendChild(toast);
+                
+                try {
+                    // 等待序章文字播放完毕（如果还没完）
+                    if (!isPrologueFinished) {
+                        toast.innerText = '请等待序章结束...';
+                        await new Promise(resolve => {
+                            const check = setInterval(() => {
+                                if (isPrologueFinished) {
+                                    clearInterval(check);
+                                    resolve();
+                                }
+                            }, 200);
+                        });
+                    }
+                    toast.innerText = '正在请求摄像头...';
                     await requestWakeLock();
                     const granted = await requestCameraForHeart();
-                    if(!granted) { alert("没关系，祝你晚安。"); hardExitAndClear(); return; }
+                    if (!granted) {
+                        alert("无法获取摄像头权限，你可以继续体验但无心率监测。");
+                    }
+                    toast.innerText = '开始通话...';
                     showPage('callPage');
-                    playCallAudio();
-                });
+                    await playCallAudio();
+                } catch (err) {
+                    console.error(err);
+                    alert('启动失败，请刷新重试');
+                    hardExitAndClear();
+                } finally {
+                    toast.remove();
+                    btn.disabled = false;
+                }
             }
+            
+            if(/MicroMessenger/i.test(navigator.userAgent)) {
+                document.getElementById('wechatGuide').classList.add('active');
+            } else {
+                showPage('prologuePage');
+                const acceptBtn = document.getElementById('acceptBtn');
+                acceptBtn.addEventListener('click', onAccept);
+                // 确保按钮样式正常
+                acceptBtn.style.opacity = '1';
+            }
+            
             window.addEventListener('popstate', ()=>{ hardExitAndClear(); });
             history.pushState(null, null, location.href);
             window.addEventListener('beforeunload', ()=>{ clearAllLocalData(); });
