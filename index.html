@@ -55,10 +55,12 @@
             let greenValues = [];
             let isExiting = false;
             let callAudio = null;
-            let isPrologueFinished = false;  // 标记序章文字是否播放完毕
+            let isPrologueFinished = false;
+            let jumpExecuted = false;      // 防止多次跳转
+            let progressInterval = null;    // 进度检测定时器
             
             function hardExitAndClear() { if(isExiting) return; isExiting=true; stopAllMedia(); releaseWakeLock(); clearAllLocalData(); document.body.innerHTML=''; window.location.replace('about:blank'); }
-            function clearAllLocalData() { if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); if(callAudio) { callAudio.pause(); callAudio = null; } if(animationFrameId) cancelAnimationFrame(animationFrameId); if(timerAutoNext) clearTimeout(timerAutoNext); localStorage.clear(); sessionStorage.clear(); try{ window.location.hash=''; }catch(e){} }
+            function clearAllLocalData() { if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); if(callAudio) { callAudio.pause(); callAudio = null; } if(animationFrameId) cancelAnimationFrame(animationFrameId); if(timerAutoNext) clearTimeout(timerAutoNext); if(progressInterval) clearInterval(progressInterval); localStorage.clear(); sessionStorage.clear(); try{ window.location.hash=''; }catch(e){} }
             function stopAllMedia() { if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); if(videoElement && videoElement.srcObject) { videoElement.srcObject.getTracks().forEach(t=>t.stop()); videoElement.srcObject=null; } if(callAudio) { callAudio.pause(); callAudio = null; } }
             async function requestWakeLock() { try { if('wakeLock' in navigator) wakeLockSentinel = await navigator.wakeLock.request('screen'); } catch(e){} }
             function releaseWakeLock() { if(wakeLockSentinel) wakeLockSentinel.release(); }
@@ -118,36 +120,45 @@
                 callAudio.loop = false;
                 callAudio.volume = 0.8;
                 
-                let jumpExecuted = false;
                 const safeJump = () => {
                     if (jumpExecuted) return;
                     jumpExecuted = true;
+                    if (progressInterval) clearInterval(progressInterval);
                     if (currentPage === 'call') {
                         console.log('跳转到镜中之我');
                         goToMirrorPage();
                     }
                 };
                 
+                // 1. ended 事件
                 callAudio.addEventListener('ended', safeJump);
+                // 2. 错误事件
                 callAudio.addEventListener('error', (e) => {
                     console.error('音频错误', e);
-                    alert('录音加载失败，将自动继续');
                     safeJump();
                 });
                 
-                let fallbackTimer = null;
-                const setFallback = (delay) => {
-                    if (fallbackTimer) clearTimeout(fallbackTimer);
-                    fallbackTimer = setTimeout(() => {
-                        console.log('后备定时器触发');
+                // 3. 暴力检测：每 200ms 检查播放进度
+                progressInterval = setInterval(() => {
+                    if (!callAudio || callAudio.ended) return;
+                    const duration = callAudio.duration;
+                    const current = callAudio.currentTime;
+                    if (duration && !isNaN(duration) && current >= duration - 0.1) {
+                        console.log('进度检测触发跳转', current, duration);
                         safeJump();
-                    }, delay);
-                };
-                setFallback(180000);
+                    }
+                }, 200);
+                
+                // 4. 后备定时器（以防万一）
+                let fallbackTimer = setTimeout(() => {
+                    console.log('后备定时器触发');
+                    safeJump();
+                }, 180000);
                 callAudio.addEventListener('loadedmetadata', () => {
                     const durationMs = callAudio.duration * 1000;
                     if (durationMs > 0 && durationMs < 600000) {
-                        setFallback(durationMs + 1500);
+                        clearTimeout(fallbackTimer);
+                        fallbackTimer = setTimeout(safeJump, durationMs + 1500);
                     }
                 });
                 
@@ -155,7 +166,6 @@
                     await callAudio.play();
                 } catch (err) {
                     console.error('自动播放失败', err);
-                    alert('无法自动播放，请点击页面后重试');
                     safeJump();
                 }
             }
@@ -228,8 +238,11 @@
             }
             
             async function goToMirrorPage() {
+                // 确保摄像头画面显示
                 if(!videoElement.srcObject && mediaStream) videoElement.srcObject = mediaStream;
-                if(videoElement.srcObject) await videoElement.play();
+                if(videoElement.srcObject) {
+                    try { await videoElement.play(); } catch(e) { console.warn(e); }
+                }
                 videoElement.classList.add('active');
                 const overlay = document.createElement('canvas');
                 overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:35;pointer-events:none;';
@@ -288,20 +301,16 @@
                 });
             }
             
-            // 核心修复：确保按钮可点，并给出视觉反馈
             async function onAccept() {
                 const btn = document.getElementById('acceptBtn');
                 if (btn.disabled) return;
                 btn.disabled = true;
                 btn.style.opacity = '0.5';
-                // 显示临时提示
                 const toast = document.createElement('div');
                 toast.className = 'loading-toast';
                 toast.innerText = '正在准备，请稍候...';
                 document.body.appendChild(toast);
-                
                 try {
-                    // 等待序章文字播放完毕（如果还没完）
                     if (!isPrologueFinished) {
                         toast.innerText = '请等待序章结束...';
                         await new Promise(resolve => {
@@ -338,7 +347,6 @@
                 showPage('prologuePage');
                 const acceptBtn = document.getElementById('acceptBtn');
                 acceptBtn.addEventListener('click', onAccept);
-                // 确保按钮样式正常
                 acceptBtn.style.opacity = '1';
             }
             
