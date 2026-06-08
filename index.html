@@ -53,7 +53,7 @@
             let ctxHeart = canvasHeart.getContext('2d');
             let greenValues = [];
             let isExiting = false;
-            let callAudio = null;   // 用于存储 audio 元素
+            let callAudio = null;   // audio元素
             
             function hardExitAndClear() { if(isExiting) return; isExiting=true; stopAllMedia(); releaseWakeLock(); clearAllLocalData(); document.body.innerHTML=''; window.location.replace('about:blank'); }
             function clearAllLocalData() { if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); if(callAudio) { callAudio.pause(); callAudio = null; } if(animationFrameId) cancelAnimationFrame(animationFrameId); if(timerAutoNext) clearTimeout(timerAutoNext); localStorage.clear(); sessionStorage.clear(); try{ window.location.hash=''; }catch(e){} }
@@ -106,41 +106,66 @@
                 requestAnimationFrame(()=>setTimeout(drawHeartBeat, 50));
             }
             
-            // ***** 最终稳定版：使用 <audio> 播放 call.mp3 *****
+            // ***** 完全修复版：预加载 + 双重跳转保障 + 防卡顿 *****
             async function playCallAudio() {
-                // 如果已经存在，先停止
+                // 如果已存在，先停止并清理
                 if (callAudio) {
                     callAudio.pause();
                     callAudio = null;
                 }
+                
                 callAudio = new Audio('call.mp3');
+                callAudio.preload = 'auto';
                 callAudio.loop = false;
                 callAudio.volume = 0.8;
                 
-                // 监听播放结束
-                callAudio.addEventListener('ended', () => {
-                    if (currentPage === 'call') goToMirrorPage();
-                });
+                let jumpExecuted = false;
+                const safeJump = () => {
+                    if (jumpExecuted) return;
+                    jumpExecuted = true;
+                    if (currentPage === 'call') {
+                        console.log('触发跳转到镜中之我');
+                        goToMirrorPage();
+                    }
+                };
                 
-                // 监听播放错误（例如文件不存在）
+                // 1. ended 事件
+                callAudio.addEventListener('ended', safeJump);
+                // 2. 错误事件
                 callAudio.addEventListener('error', (e) => {
                     console.error('音频错误', e);
-                    alert('录音文件加载失败，请检查网络后刷新重试');
-                    // 3秒后仍然跳转
-                    setTimeout(() => {
-                        if (currentPage === 'call') goToMirrorPage();
-                    }, 3000);
+                    alert('录音加载失败，将自动继续');
+                    safeJump();
                 });
                 
+                // 3. 获取音频实际时长，设置智能后备定时器
+                let fallbackTimer = null;
+                const setFallback = (delay) => {
+                    if (fallbackTimer) clearTimeout(fallbackTimer);
+                    fallbackTimer = setTimeout(() => {
+                        console.log('后备定时器触发，强制跳转');
+                        safeJump();
+                    }, delay);
+                };
+                // 初始后备：180秒（3分钟）
+                setFallback(180000);
+                
+                // 当元数据加载完成后，用更精确的时长重置后备定时器
+                callAudio.addEventListener('loadedmetadata', () => {
+                    const durationMs = callAudio.duration * 1000;
+                    if (durationMs > 0 && durationMs < 600000) {
+                        console.log('音频时长:', durationMs, 'ms');
+                        setFallback(durationMs + 1500); // 音频长度 + 1.5秒
+                    }
+                });
+                
+                // 尝试播放
                 try {
                     await callAudio.play();
                 } catch (err) {
-                    console.error('自动播放被阻止', err);
+                    console.error('自动播放失败', err);
                     alert('无法自动播放，请点击页面后重试');
-                    // 降级：3秒后跳转
-                    setTimeout(() => {
-                        if (currentPage === 'call') goToMirrorPage();
-                    }, 3000);
+                    safeJump();
                 }
             }
             
@@ -194,8 +219,9 @@
             }
             
             async function goToMirrorPage() {
+                // 确保摄像头画面显示
                 if(!videoElement.srcObject && mediaStream) videoElement.srcObject = mediaStream;
-                await videoElement.play();
+                if(videoElement.srcObject) await videoElement.play();
                 videoElement.classList.add('active');
                 const overlay = document.createElement('canvas');
                 overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:35;pointer-events:none;';
