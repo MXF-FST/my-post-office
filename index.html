@@ -7,14 +7,20 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
         body { background-color: #000000; color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Roboto", sans-serif; font-size: 16px; line-height: 1.8; text-align: center; width: 100vw; height: 100vh; overflow: hidden; position: fixed; touch-action: none; }
-        .page { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; opacity: 0; visibility: hidden; transition: opacity 0.5s ease; background-color: #000000; padding: 20px; box-sizing: border-box; }
+        
+        /* 页面基础：默认不可滚动 */
+        .page { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; opacity: 0; visibility: hidden; transition: opacity 0.5s ease; background-color: #000000; padding: 20px; box-sizing: border-box; overflow-y: hidden; }
         .page.active { opacity: 1; visibility: visible; z-index: 10; }
+        
+        /* 唯独序章页面允许滚动（因为文字太多，按钮需要可见） */
+        #prologuePage { overflow-y: auto; justify-content: flex-start; padding-top: 40px; padding-bottom: 80px; }
+        
         .text-line { display: block; margin: 0.5rem 0; animation: breatheFade 2s ease-in-out forwards; opacity: 0; word-break: break-word; max-width: 12em; margin-left: auto; margin-right: auto; }
         @keyframes breatheFade { 0% { opacity: 0; } 100% { opacity: 1; } }
         .text-button { color: #FFFFFF; background: none; border: none; font-size: 16px; line-height: 1.8; cursor: pointer; margin: 1rem 0; padding: 8px 0; font-family: inherit; transition: opacity 0.2s; display: inline-block; }
         .text-button:active { opacity: 0.7; }
         
-        /* 美化通话界面样式 */
+        /* 美化通话界面 */
         .call-ui {
             position: fixed;
             top: 0;
@@ -77,11 +83,9 @@
             background: rgba(0,0,0,0.3);
             padding: 8px 20px;
             border-radius: 30px;
-            width: auto;
             display: inline-block;
-            pointer-events: none;  /* 纯装饰，不可点击 */
+            pointer-events: none;
         }
-        /* 心跳光晕覆盖在美化层之上 */
         #heartbeatCanvas {
             position: fixed;
             top: 0;
@@ -95,7 +99,6 @@
         .heartbeat-active #heartbeatCanvas {
             display: block;
         }
-        /* 其他页面样式保持不变 */
         .camera-layer { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 30; transform: scaleX(-1); display: none; }
         .camera-layer.active { display: block; }
         .camera-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 31; pointer-events: none; }
@@ -110,25 +113,27 @@
     </style>
 </head>
 <body>
-    <!-- 微信引导页 -->
     <div id="wechatGuide" class="page"><div style="max-width:280px;"><div class="text-line">这是一次需要</div><div class="text-line">全屏、安静、不被打扰的通话</div><div class="text-line" style="margin-top:24px;">微信太吵了</div><div class="text-line" style="margin-top:24px;">请点击右上角</div><div class="text-line">选择「在浏览器中打开」</div><div class="text-line">我们在那里等你</div></div></div>
-    <!-- 序章 -->
-    <div id="prologuePage" class="page"><div id="prologueText"></div><button id="acceptBtn" class="text-button" style="margin-top:48px;">我接受，开始通话</button></div>
-    <!-- 通话中 - 原始空白页（用于控制心跳active） -->
+    
+    <div id="prologuePage" class="page">
+        <div id="prologueText"></div>
+        <button id="acceptBtn" class="text-button" style="margin-top:48px; margin-bottom: 30px;">我接受，开始通话</button>
+    </div>
+    
     <div id="callPage" class="page"></div>
-    <!-- 美化通话界面 -->
     <div id="callUI" class="call-ui">
         <div class="call-status">通话中 • 边缘心跳与你同步</div>
         <div class="call-avatar"></div>
         <div class="call-timer" id="callTimer">00:00</div>
         <div class="call-decor-hangup">· 仅作装饰 ·</div>
     </div>
-    <!-- 摄像头及其他 -->
+    
     <video id="cameraVideo" class="camera-layer" autoplay playsinline muted></video>
     <div class="camera-overlay" id="cameraOverlay"><div class="escape-text">按住屏幕，回到黑暗</div><div class="hold-to-exit" id="holdToExit"></div></div>
     <div id="epiloguePage" class="page"><div id="epilogueText"></div></div>
     <div id="conversionPage" class="page"><div id="conversionContent"></div></div>
     <canvas id="heartbeatCanvas"></canvas>
+    
     <script>
         (function(){
             let currentPage = null;
@@ -137,7 +142,6 @@
             let heartRateBPM = 75;
             let heartRateValid = false;
             let animationFrameId = null;
-            let timerAutoNext = null;
             let heartRateHistory = [];
             let videoElement = document.getElementById('cameraVideo');
             let canvasHeart = document.getElementById('heartbeatCanvas');
@@ -148,16 +152,27 @@
             let isPrologueFinished = false;
             let jumpExecuted = false;
             let progressInterval = null;
-            let callStartTime = 0;
             let timerInterval = null;
+            let callStartTime = 0;
             
-            // 美化UI元素
             const callUIDiv = document.getElementById('callUI');
             const callTimerSpan = document.getElementById('callTimer');
             
             function hardExitAndClear() { if(isExiting) return; isExiting=true; stopAllMedia(); releaseWakeLock(); clearAllLocalData(); document.body.innerHTML=''; window.location.replace('about:blank'); }
-            function clearAllLocalData() { if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); if(callAudio) { callAudio.pause(); callAudio = null; } if(animationFrameId) cancelAnimationFrame(animationFrameId); if(timerAutoNext) clearTimeout(timerAutoNext); if(progressInterval) clearInterval(progressInterval); if(timerInterval) clearInterval(timerInterval); localStorage.clear(); sessionStorage.clear(); try{ window.location.hash=''; }catch(e){} }
-            function stopAllMedia() { if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); if(videoElement && videoElement.srcObject) { videoElement.srcObject.getTracks().forEach(t=>t.stop()); videoElement.srcObject=null; } if(callAudio) { callAudio.pause(); callAudio = null; } }
+            function clearAllLocalData() { 
+                if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); 
+                if(callAudio) { callAudio.pause(); callAudio = null; } 
+                if(animationFrameId) cancelAnimationFrame(animationFrameId); 
+                if(progressInterval) clearInterval(progressInterval); 
+                if(timerInterval) clearInterval(timerInterval); 
+                localStorage.clear(); sessionStorage.clear(); 
+                try{ window.location.hash=''; }catch(e){} 
+            }
+            function stopAllMedia() { 
+                if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); 
+                if(videoElement && videoElement.srcObject) { videoElement.srcObject.getTracks().forEach(t=>t.stop()); videoElement.srcObject=null; } 
+                if(callAudio) { callAudio.pause(); callAudio = null; } 
+            }
             async function requestWakeLock() { try { if('wakeLock' in navigator) wakeLockSentinel = await navigator.wakeLock.request('screen'); } catch(e){} }
             function releaseWakeLock() { if(wakeLockSentinel) wakeLockSentinel.release(); }
             
@@ -206,7 +221,6 @@
                 requestAnimationFrame(()=>setTimeout(drawHeartBeat, 50));
             }
             
-            // 启动通话计时器
             function startCallTimer() {
                 callStartTime = Date.now();
                 if (timerInterval) clearInterval(timerInterval);
@@ -256,22 +270,26 @@
                     }
                 }, 200);
                 
-                // 后备定时器
-                let fallbackTimer = setTimeout(() => {
-                    console.log('后备定时器触发');
-                    safeJump();
-                }, 180000);
+                // 后备定时器（音频时长+1秒）
+                let fallbackTimer = null;
+                const setFallback = (delay) => {
+                    if (fallbackTimer) clearTimeout(fallbackTimer);
+                    fallbackTimer = setTimeout(() => {
+                        console.log('后备定时器触发');
+                        safeJump();
+                    }, delay);
+                };
+                setFallback(180000);
                 callAudio.addEventListener('loadedmetadata', () => {
                     const durationMs = callAudio.duration * 1000;
                     if (durationMs > 0 && durationMs < 600000) {
-                        clearTimeout(fallbackTimer);
-                        fallbackTimer = setTimeout(safeJump, durationMs + 1500);
+                        setFallback(durationMs + 1500);
                     }
                 });
                 
                 try {
                     await callAudio.play();
-                    startCallTimer(); // 开始计时
+                    startCallTimer();
                 } catch (err) {
                     console.error('自动播放失败', err);
                     safeJump();
@@ -285,7 +303,6 @@
                 currentPage = pageId;
                 if(pageId === 'callPage') {
                     document.body.classList.add('heartbeat-active');
-                    // 显示美化UI
                     callUIDiv.classList.add('active');
                 } else {
                     document.body.classList.remove('heartbeat-active');
@@ -353,6 +370,7 @@
             }
             
             async function goToMirrorPage() {
+                // 确保摄像头画面存在
                 if(!videoElement.srcObject && mediaStream) videoElement.srcObject = mediaStream;
                 if(videoElement.srcObject) {
                     try { await videoElement.play(); } catch(e) { console.warn(e); }
