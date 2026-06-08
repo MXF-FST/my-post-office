@@ -106,44 +106,27 @@
                 requestAnimationFrame(()=>setTimeout(drawHeartBeat, 50));
             }
             
-            // ***** 重要：这里加载您上传的 call.mp3 音频 *****
+                      // 使用 <audio> 标签播放，简单稳定
             async function playCallAudio() {
-                audioCtxGlobal = new (window.AudioContext || window.webkitAudioContext)();
-                const gainNode = audioCtxGlobal.createGain();
-                gainNode.gain.value = 0.8;
-                gainNode.connect(audioCtxGlobal.destination);
+                // 创建一个隐藏的 audio 元素
+                const audio = new Audio('call.mp3');
+                audio.loop = false;
+                audio.volume = 0.8;
                 
-                // 加载您上传的 call.mp3 文件（必须与 index.html 在同一目录）
+                // 播放音频
                 try {
-                    const response = await fetch('call.mp3');
-                    if (!response.ok) throw new Error('音频文件加载失败');
-                    const arrayBuffer = await response.arrayBuffer();
-                    const audioBuffer = await audioCtxGlobal.decodeAudioData(arrayBuffer);
-                    const source = audioCtxGlobal.createBufferSource();
-                    source.buffer = audioBuffer;
-                    source.connect(gainNode);
-                    source.start();
-                    // 音频播放结束后自动跳转到镜中之我
-                    source.onended = () => {
-                        if(currentPage === 'call') goToMirrorPage();
-                    };
-                } catch(e) {
-                    console.warn('音频加载失败，使用备用合成语音', e);
-                    // 备用：合成语音（确保流程继续）
-                    const bufferSize = audioCtxGlobal.sampleRate * 3;
-                    const noiseBuffer = audioCtxGlobal.createBuffer(1, bufferSize, audioCtxGlobal.sampleRate);
-                    let output = noiseBuffer.getChannelData(0);
-                    for(let i=0;i<bufferSize;i++) output[i] = (Math.random() * 0.1 - 0.05);
-                    const noiseSrc = audioCtxGlobal.createBufferSource();
-                    noiseSrc.buffer = noiseBuffer;
-                    noiseSrc.loop = true;
-                    noiseSrc.connect(gainNode);
-                    noiseSrc.start();
-                    const synth = window.speechSynthesis;
-                    const utterance = new SpeechSynthesisUtterance("谢谢你来送我... 再见");
-                    utterance.rate = 0.9;
-                    synth.speak(utterance);
-                    setTimeout(()=>{ if(currentPage === 'call') goToMirrorPage(); }, 155000);
+                    await audio.play();
+                    // 监听播放结束事件
+                    audio.addEventListener('ended', () => {
+                        if (currentPage === 'call') goToMirrorPage();
+                    });
+                } catch (err) {
+                    console.error('音频播放失败', err);
+                    alert('无法播放录音，请检查网络后刷新重试');
+                    // 3秒后仍跳转，避免卡死
+                    setTimeout(() => {
+                        if (currentPage === 'call') goToMirrorPage();
+                    }, 3000);
                 }
             }
             
